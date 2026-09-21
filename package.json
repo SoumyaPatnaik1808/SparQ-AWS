@@ -9,6 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1136.0",
+    "@aws-sdk/client-dynamodb": "^3.1136.0",
+    "@aws-sdk/lib-dynamodb": "^3.1136.0",
+    "framer-motion": "^13.1.0",
+    "lucide-react": "^1.47.0",
     "next": "16.3.5",
     "react": "19.2.8",
     "react-dom": "19.2.8"
