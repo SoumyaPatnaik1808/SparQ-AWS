@@ -1,7 +1,8 @@
 "use server";
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { requireTeacher } from "./auth";
 
 const client = new DynamoDBClient({
   region: process.env.NEXT_PUBLIC_AWS_REGION || "ap-south-1",
@@ -67,4 +68,28 @@ export async function getFeedPosts(): Promise<Array<Record<string, unknown>>> {
     console.error("DynamoDB Scan Error:", error);
     return MOCK_POSTS;
   }
+}
+
+export async function createPost(formData: FormData) {
+  const session = await requireTeacher();
+  const post = {
+    id: `post-${Date.now()}`,
+    entityType: "post",
+    authorEmail: session.email,
+    authorName: "Teacher",
+    authorTitle: "VSSUT Teacher",
+    authorImage: "",
+    rating: 5,
+    swaps: 0,
+    postTitle: String(formData.get("title") ?? "").trim(),
+    postDescription: String(formData.get("description") ?? "").trim(),
+    tags: String(formData.get("tags") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean),
+    learnItems: String(formData.get("learnItems") ?? "").split("\n").map((item) => item.trim()).filter(Boolean),
+    lookingFor: String(formData.get("lookingFor") ?? "").trim(),
+    barterType: "1:1 Barter",
+    createdAt: new Date().toISOString(),
+  };
+  if (!post.postTitle || !post.postDescription) return { error: "Title and description are required." };
+  await docClient.send(new PutCommand({ TableName: TABLE_NAME, Item: post }));
+  return { success: true, post };
 }

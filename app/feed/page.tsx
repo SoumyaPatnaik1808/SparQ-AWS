@@ -3,8 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { CheckCircle2, Star, ArrowLeftRight, X, Layers } from 'lucide-react';
-import { getFeedPosts } from '../actions/feed';
+import { CheckCircle2, Star, ArrowLeftRight, X, Layers, Plus } from 'lucide-react';
+import { createPost, getFeedPosts } from '../actions/feed';
+import { getSession } from '../actions/auth';
+import Navbar from '../components/Navbar';
 
 interface Post {
   id: string;
@@ -49,6 +51,10 @@ function FeedPage() {
   const [matchAnimation, setMatchAnimation] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [showCommunityDropdown, setShowCommunityDropdown] = useState(false);
+  const [showPostModal, setShowPostModal] = useState(false);
+  const [isTeacher, setIsTeacher] = useState(false);
+  const [postError, setPostError] = useState('');
+  const [postLoading, setPostLoading] = useState(false);
 
   const handlePass = () => {
     setCurrentIndex(prev => prev + 1);
@@ -67,6 +73,7 @@ function FeedPage() {
   };
 
   useEffect(() => {
+    getSession().then((session) => setIsTeacher(session.isTeacher));
     async function loadPosts() {
       const data = await getFeedPosts();
       setPosts(data.map((post) => normalizePost(post as Record<string, unknown>)));
@@ -74,6 +81,22 @@ function FeedPage() {
     }
     loadPosts();
   }, []);
+
+  const handleCreatePost = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPostLoading(true);
+    setPostError('');
+    const result = await createPost(new FormData(event.currentTarget));
+    if (result.error) {
+      setPostError(result.error);
+    } else {
+      setShowPostModal(false);
+      event.currentTarget.reset();
+      const data = await getFeedPosts();
+      setPosts(data.map((post) => normalizePost(post as Record<string, unknown>)));
+    }
+    setPostLoading(false);
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -177,31 +200,30 @@ function FeedPage() {
         )}
       </AnimatePresence>
 
-      {/* Navbar */}
-      <header className="border-b border-[#1a261f] bg-[#0d1410] px-6 flex items-center justify-between h-[72px] shrink-0 z-10">
-        <div className="flex items-center gap-10 h-full">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push('/')}>
-            <div className="text-xl font-bold tracking-tight">SparQ</div>
-          </div>
-          <nav className="hidden md:flex items-center gap-8 h-full">
-            <a href="#" className="text-[#f28b50] font-medium border-b-2 border-[#f28b50] h-full flex items-center">Feed</a>
-            <a href="#" className="text-[#88948d] hover:text-white font-medium transition-colors">Community</a>
-            <a href="#" className="text-[#88948d] hover:text-white font-medium transition-colors">Calendar</a>
-            <a href="#" className="text-[#88948d] hover:text-white font-medium transition-colors">Profile</a>
-          </nav>
-        </div>
-        <div className="flex items-center gap-3">
-          {isGuest ? (
-            <button onClick={() => router.push('/login')} className="text-sm font-semibold text-white bg-[#1a261f] hover:bg-[#233329] px-4 py-2 rounded-lg transition-colors">
-              Login
-            </button>
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-[#1a261f] border border-[#2a3c31] overflow-hidden flex items-center justify-center">
-               <span className="text-xs font-bold text-[#88948d]">ME</span>
+      <Navbar guest={isGuest} />
+
+      {isTeacher && (
+        <button type="button" onClick={() => setShowPostModal(true)} className="absolute right-5 top-[88px] z-20 flex items-center gap-2 rounded-lg bg-[#f28b50] px-4 py-2.5 text-sm font-semibold text-black shadow-lg hover:bg-[#e0773b]">
+          <Plus className="h-4 w-4" /> Post a skill
+        </button>
+      )}
+
+      <AnimatePresence>
+        {showPostModal && <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <motion.form onSubmit={handleCreatePost} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-lg rounded-2xl border border-[#2a3c31] bg-[#111914] p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f28b50]">Teacher profile</p><h2 className="mt-1 text-2xl font-bold">Post a skill</h2></div><button type="button" onClick={() => setShowPostModal(false)} title="Close"><X className="h-5 w-5 text-[#88948d]" /></button></div>
+            <div className="space-y-4">
+              <input name="title" required placeholder="Post title" className="w-full rounded-lg border border-[#2a3c31] bg-[#0a0f0c] px-4 py-3 text-sm outline-none focus:border-[#f28b50]" />
+              <textarea name="description" required rows={4} placeholder="What will students learn?" className="w-full resize-none rounded-lg border border-[#2a3c31] bg-[#0a0f0c] px-4 py-3 text-sm outline-none focus:border-[#f28b50]" />
+              <input name="lookingFor" placeholder="What skill are you looking for?" className="w-full rounded-lg border border-[#2a3c31] bg-[#0a0f0c] px-4 py-3 text-sm outline-none focus:border-[#f28b50]" />
+              <input name="tags" placeholder="Tags, separated by commas" className="w-full rounded-lg border border-[#2a3c31] bg-[#0a0f0c] px-4 py-3 text-sm outline-none focus:border-[#f28b50]" />
+              <textarea name="learnItems" rows={3} placeholder="Learning outcomes, one per line" className="w-full resize-none rounded-lg border border-[#2a3c31] bg-[#0a0f0c] px-4 py-3 text-sm outline-none focus:border-[#f28b50]" />
             </div>
-          )}
-        </div>
-      </header>
+            {postError && <p className="mt-3 text-sm text-red-400">{postError}</p>}
+            <button disabled={postLoading} className="mt-5 w-full rounded-lg bg-[#f28b50] py-3 text-sm font-bold text-black disabled:opacity-50">{postLoading ? 'Publishing...' : 'Publish post'}</button>
+          </motion.form>
+        </div>}
+      </AnimatePresence>
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col items-center justify-center p-4 relative overflow-hidden">

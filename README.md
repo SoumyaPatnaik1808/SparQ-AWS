@@ -14,6 +14,7 @@ The application currently includes a polished landing page, student registration
 - Pass or match with opportunities using buttons, horizontal drag gestures, or keyboard shortcuts.
 - Show a guest sign-up prompt when an unauthenticated visitor tries to match.
 - Show a successful-match flow for authenticated users, including the option to join the creator's community.
+- Listen for new Cal.com session bookings through an AWS AppSync GraphQL subscription at `/calendar`.
 - Responsive dark interface with Framer Motion transitions and Lucide icons.
 
 ## Technology
@@ -24,6 +25,7 @@ The application currently includes a polished landing page, student registration
 - Framer Motion for interaction and page transitions
 - Lucide React for interface icons
 - AWS SDK v3 for Cognito and DynamoDB integration
+- AWS Amplify API for AppSync GraphQL subscriptions
 - ESLint with the Next.js configuration
 
 ## Requirements
@@ -33,6 +35,7 @@ The application currently includes a polished landing page, student registration
 - AWS credentials available to the server-side AWS SDK when using Cognito or DynamoDB.
 - An Amazon Cognito User Pool and App Client for registration and login.
 - A DynamoDB table containing feed items if you want to load live opportunities instead of the fallback posts.
+- An AppSync GraphQL API exposing `onSessionAdded(studentEmail: String!)`.
 
 ## Getting Started
 
@@ -73,11 +76,13 @@ Open [http://localhost:3000](http://localhost:3000) in a browser.
 app/
 	actions/
 		auth.ts          # Cognito registration
-		confirmSignUp.ts # Cognito sign-up confirmation
 		feed.ts          # DynamoDB feed loading and fallback data
 		login.ts         # Cognito login and session cookies
 		verifyOtp.ts     # Cognito MFA challenge verification
 	feed/page.tsx      # Swipeable barter feed
+	calendar/page.tsx  # Real-time session booking view
+	components/        # Client components, including the session subscription
+	lib/amplify.ts      # Browser-side AppSync/Amplify configuration
 	login/page.tsx     # Login form
 	register/page.tsx  # Registration form and skill selection
 	globals.css        # Global Tailwind and page styles
@@ -100,7 +105,7 @@ Registration sends the following user attributes to Cognito:
 
 The app calculates a Cognito `SECRET_HASH` using the configured client secret. Login uses the `USER_PASSWORD_AUTH` flow. When authentication succeeds, the server stores `sparq_auth` and, when returned by Cognito, `sparq_id_token` as HTTP-only cookies for seven days.
 
-The current login UI reports an error if Cognito returns an MFA challenge. The repository contains server actions for OTP and sign-up confirmation, but the corresponding user-facing flows are not currently wired into the visible registration and login pages.
+The current login UI reports an error if Cognito returns an MFA challenge. The app does not provide a sign-up email confirmation flow; configure the Cognito user pool to auto-confirm users and disable required email verification if registration should not require an OTP.
 
 ### DynamoDB
 
@@ -125,6 +130,27 @@ The feed action scans the table named by `DYNAMODB_TABLE_NAME`. Each feed item i
 
 If the scan fails or returns no items, `app/actions/feed.ts` returns the built-in sample opportunities instead.
 
+### AppSync and Cal.com session updates
+
+The calendar page uses `generateClient` from `@aws-amplify/api` to subscribe to the `onSessionAdded` AppSync field. Incoming events are filtered by the student email supplied on the page and inserted into local React state immediately. Duplicate event IDs replace the older copy, and the subscription is unsubscribed automatically when the component unmounts.
+
+The repository currently receives the AppSync real-time URL in `NEXT_PUBLIC_APPSYNC_GRAPHQL_URL`. The client derives the HTTPS GraphQL endpoint from a URL such as `wss://API_ID.appsync-realtime-api.REGION.amazonaws.com/graphql`. Add the matching AppSync API key as `NEXT_PUBLIC_APPSYNC_API_KEY` when the API uses API key authentication. The subscription currently uses `authMode: "apiKey"`; change the Amplify configuration and auth mode together if the AppSync API uses Cognito User Pools or IAM instead.
+
+The expected subscription shape is:
+
+```graphql
+subscription OnSessionAdded($studentEmail: String!) {
+	onSessionAdded(studentEmail: $studentEmail) {
+		id
+		title
+		startTime
+		status
+	}
+}
+```
+
+Open `/calendar`, enter the email that Cal.com sends with the booking event, and keep the page open to see new sessions arrive without refreshing.
+
 ## How the Feed Works
 
 1. The feed loads posts through the `getFeedPosts` server action.
@@ -145,6 +171,7 @@ The current feed route is a client-rendered experience and does not yet enforce 
 - The home, login, registration, and feed experiences use a dark green-and-orange visual system defined primarily through Tailwind utility classes.
 - The root layout still contains the default Next.js metadata values and can be updated with production title and description values.
 - Several feed navigation items such as Community, Calendar, and Profile are currently presentation-only links.
+- The `/calendar` page is the first live calendar surface; it currently asks for the student email because the existing HTTP-only auth cookies are not readable by browser code.
 - No automated test suite is configured yet; use `npm run lint` and `npm run build` as the current validation checks.
 
 ## Deployment

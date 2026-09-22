@@ -56,8 +56,7 @@ export default function Login() {
           <div className="mb-8">
             <h2 className="text-2xl font-bold tracking-tight mb-2">Login to SparQ</h2>
             <p className="text-[#88948d] text-sm">
-              Don&apos;t have an account?{' '}
-              <Link href="/register" className="text-[#f28b50] hover:underline">Sign up</Link>
+              Use an approved university account to continue.
             </p>
           </div>
 
