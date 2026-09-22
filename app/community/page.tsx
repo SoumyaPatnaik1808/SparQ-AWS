@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import { createCommunity } from "../actions/community";
-import { createSession } from "../actions/sessions";
+import { createSession, updateSessionAttendance } from "../actions/sessions";
 
 type CommunityType = "owned" | "member";
 type Attendance = "attending" | "not attending" | null;
@@ -160,6 +160,7 @@ export default function CommunityPage() {
   const [communityLoading, setCommunityLoading] = useState(false);
   const [communityList, setCommunityList] = useState(communities);
   const [sessionError, setSessionError] = useState("");
+  const [attendanceError, setAttendanceError] = useState("");
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionSlotLocked, setSessionSlotLocked] = useState(false);
   const [lockedSlot, setLockedSlot] = useState({ startTime: "", endTime: "" });
@@ -234,7 +235,15 @@ export default function CommunityPage() {
     setSessionLoading(false);
   };
 
-  const updateAttendance = (nextAttendance: Exclude<Attendance, null>) => {
+  const updateAttendance = async (nextAttendance: Exclude<Attendance, null>) => {
+    setAttendanceError("");
+    const nextValue = attendance === nextAttendance ? null : nextAttendance;
+    const result = await updateSessionAttendance(selectedCommunity.id, nextValue === "attending");
+    if (result.error) {
+      setAttendanceError(result.error);
+      return;
+    }
+
     if (attendance === nextAttendance) {
       setAttendance(null);
       setAttendeeCount((count) => Math.max(0, count - (nextAttendance === "attending" ? 1 : 0)));
@@ -330,6 +339,7 @@ export default function CommunityPage() {
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f28b50]">Community calendar</p>
               <h2 className="mt-2 text-lg font-bold">Upcoming session</h2>
+              {attendanceError && <p className="mt-2 text-xs text-red-400">{attendanceError}</p>}
             </div>
             <CalendarDays className="h-5 w-5 text-[#f28b50]" />
           </div>

@@ -1,8 +1,9 @@
 "use server";
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { getSession, requireTeacher } from "./auth";
+import { DynamoDBDocumentClient, PutCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { cookies } from "next/headers";
+import { getSession, requireAuthenticatedUser, requireTeacher } from "./auth";
 
 const client = new DynamoDBClient({ region: process.env.NEXT_PUBLIC_AWS_REGION || "ap-south-1" });
 const docClient = DynamoDBDocumentClient.from(client);
@@ -39,6 +40,21 @@ const FALLBACK_SESSIONS: SparqSession[] = [
     status: "scheduled",
     attendeeEmails: ["student-1@vssut.ac.in", "student-2@vssut.ac.in", "student-3@vssut.ac.in"],
   },
+  {
+    id: "demo-navigation-session-figma",
+    entityType: "session",
+    communityId: "figma-studio",
+    communityName: "Figma studio",
+    title: "Navigation architecture office hours",
+    description: "Bring one routing issue for feedback on navigation patterns that stay fast as your app grows.",
+    startTime: "2026-09-25T12:00:00.000Z",
+    endTime: "2026-09-25T13:00:00.000Z",
+    meetingUrl: "",
+    hostEmail: "teacher-1@vssut.ac.in",
+    capacity: 11,
+    status: "scheduled",
+    attendeeEmails: ["student-1@vssut.ac.in", "student-2@vssut.ac.in", "student-3@vssut.ac.in"],
+  },
 ];
 
 export interface SparqSession {
@@ -61,6 +77,8 @@ export interface SparqSession {
 export async function getSessions(): Promise<SparqSession[]> {
   const session = await getSession();
   if (!session.authenticated || !session.email) return [];
+  const email = session.email;
+  const cookieStore = await cookies();
 
   try {
     const response = await docClient.send(new ScanCommand({
@@ -73,17 +91,20 @@ export async function getSessions(): Promise<SparqSession[]> {
     return items.filter((item) => {
       const record = item as SparqSession & { attendeeEmails?: unknown };
       const attendees = Array.isArray(record.attendeeEmails) ? record.attendeeEmails : [];
-      return record.hostEmail === session.email || (session.email !== null && attendees.includes(session.email));
+      const localAttendance = cookieStore.get(`sparq_attendance_${record.communityId}`)?.value;
+      return localAttendance !== "not attending" && (record.hostEmail === email || attendees.includes(email) || localAttendance === "attending");
     }).map((item) => {
       const record = item as SparqSession & { attendeeEmails?: unknown };
       return {
         ...record,
-        viewerType: record.hostEmail === session.email ? "hosting" : "attending",
+        viewerType: record.hostEmail === email ? "hosting" : "attending",
       };
     }) as SparqSession[];
   } catch (error) {
     console.error("DynamoDB Session Scan Error:", error);
-    return [];
+    return FALLBACK_SESSIONS.filter((record) =>
+      record.hostEmail === session.email || cookieStore.get(`sparq_attendance_${record.communityId}`)?.value === "attending",
+    ).map((record) => ({ ...record, viewerType: record.hostEmail === session.email ? "hosting" : "attending" }));
   }
 }
 
@@ -121,4 +142,57 @@ export async function createSession(formData: FormData) {
 
   await docClient.send(new PutCommand({ TableName: TABLE_NAME, Item: item }));
   return { success: true, session: item };
+}
+
+export async function updateSessionAttendance(communityId: string, attending: boolean) {
+  const session = await requireAuthenticatedUser();
+  const email = session.email;
+  if (!email) return { error: "You must be logged in to update attendance." };
+  const cookieStore = await cookies();
+  const attendanceCookie = `sparq_attendance_${communityId}`;
+  let storedSession: SparqSession | undefined;
+
+  try {
+    const response = await docClient.send(new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: "entityType = :entityType AND communityId = :communityId",
+      ExpressionAttributeValues: { ":entityType": "session", ":communityId": communityId },
+    }));
+    storedSession = response.Items?.[0] as SparqSession | undefined;
+  } catch (error) {
+    console.error("DynamoDB Attendance Scan Error:", error);
+    cookieStore.set(attendanceCookie, attending ? "attending" : "not attending", { httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 30, path: "/" });
+    return { success: true, attending, localOnly: true };
+  }
+
+  const fallbackSession = FALLBACK_SESSIONS.find((item) => item.communityId === communityId);
+  const target = storedSession ?? fallbackSession;
+
+  if (!target) return { error: "No session is scheduled for this community." };
+
+  const attendees = Array.isArray(target.attendeeEmails) ? [...target.attendeeEmails] : [];
+  const attendeeIndex = attendees.indexOf(email);
+  if (attending && attendeeIndex === -1) attendees.push(email);
+  if (!attending && attendeeIndex !== -1) attendees.splice(attendeeIndex, 1);
+
+  try {
+    if (storedSession) {
+      await docClient.send(new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: { id: storedSession.id },
+        UpdateExpression: "SET attendeeEmails = :attendeeEmails",
+        ExpressionAttributeValues: { ":attendeeEmails": attendees },
+      }));
+    } else {
+      await docClient.send(new PutCommand({
+        TableName: TABLE_NAME,
+        Item: { ...target, attendeeEmails: attendees },
+      }));
+    }
+  } catch (error) {
+    console.error("DynamoDB Attendance Update Error:", error);
+    cookieStore.set(attendanceCookie, attending ? "attending" : "not attending", { httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 30, path: "/" });
+  }
+
+  return { success: true, attending };
 }
